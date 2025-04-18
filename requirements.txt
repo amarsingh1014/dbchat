@@ -1,0 +1,21 @@
+# Core LangChain dependencies
+langchain
+langchain_community
+
+# Database connections
+sqlalchemy
+
+# LLM provider
+langchain_groq
+
+# Web UI
+streamlit
+
+
+# Environment variables
+python-dotenv
+
+
+# For embeddings (if needed later)
+# sentence-transformers
+# faiss-cpu
