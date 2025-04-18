@@ -35,8 +35,3 @@ A Streamlit application that allows users to query databases using natural langu
 ## Requirements
 
 See `requirements.txt` for a full list of dependencies.
-
-## License
-
-MIT
-
