@@ -158,7 +158,7 @@ if connect_button or "db_connected" in st.session_state:
                 
             with st.chat_message("assistant"):
                 st_callback = StreamlitCallbackHandler(st.container())
-                response = st.session_state.agent.run(prompt, callbacks=[st_callback])
+                response = st.session_state.agent.invoke(prompt, callbacks=[st_callback])
                 st.markdown(response)
                 
             st.session_state.messages.append({"role": "assistant", "content": response})
