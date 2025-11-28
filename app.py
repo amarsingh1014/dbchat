@@ -5,19 +5,13 @@ import streamlit as st
 
 from typing import Optional
 
-# SQL / DB
-from sqlalchemy import create_engine
-from langchain_community.utilities import SQLDatabase
-from langchain_community.agent_toolkits.sql.toolkit import SQLDatabaseToolkit
-
-# LangGraph + Groq (agentic)
-from langchain_groq import ChatGroq
-from langgraph.prebuilt import create_react_agent
-from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.messages import HumanMessage
-
 # Custom DB generator
 from dbgen import create_sample_database
+
+# Modularized imports
+from src.database import create_sql_database_and_toolkit
+from src.agent import build_langgraph_agent
+from src.chat import render_chat_history, stream_graph_events
 
 load_dotenv()
 
@@ -113,72 +107,8 @@ with st.sidebar:
 # ---------------------------
 # Helper: safe render chat history
 # ---------------------------
-def render_chat_history():
-    for msg in st.session_state.messages or []:
-        if not isinstance(msg, dict):
-            continue
-        if "role" not in msg or "content" not in msg:
-            continue
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
+# render_chat_history() is now imported from src.chat
 render_chat_history()
-
-# ---------------------------
-# Utilities creating agent/toolkit
-# ---------------------------
-def create_sql_database_and_toolkit(connection_string: str):
-    """
-    Create engine + SQLDatabase wrapper + return engine and SQLDatabase object.
-    """
-    engine = create_engine(connection_string)
-    # SQLDatabase can accept an engine or a connection URI depending on version.
-    sql_db = SQLDatabase(engine)
-    return engine, sql_db
-
-def build_langgraph_agent(sql_db: SQLDatabase, groq_model: str, groq_api_key: Optional[str]):
-    """
-    Build the LangGraph ReAct agent graph with SQLDatabaseToolkit.
-    We return the graph object (agent_graph).
-    """
-    # LLM initialization - adjust args to your ChatGroq version if needed
-    # Use deterministic behavior for SQL: temperature=0
-    try:
-        llm = ChatGroq(
-            model=groq_model,
-            temperature=0,
-            max_retries=2,
-            groq_api_key=groq_api_key if groq_api_key else None
-        )
-    except TypeError:
-        # fallback if ChatGroq expects different arg names in your installed version
-        llm = ChatGroq(
-            model=groq_model,
-            temperature=0
-        )
-
-    toolkit = SQLDatabaseToolkit(db=sql_db, llm=llm)
-    tools = toolkit.get_tools()
-
-    system_prompt = """You are an expert SQL Data Analyst interacting with a SQL database.
-Rules:
-1) Begin by listing tables to understand available data.
-2) Inspect schema only for relevant tables.
-3) Use SELECT only (no INSERT/UPDATE/DELETE/DROP).
-4) Limit results to 5 rows unless user asks for more.
-5) If a SQL query errors, analyze and correct it, then retry once.
-"""
-
-    memory = MemorySaver()
-
-    # create_react_agent from langgraph; use 'prompt' parameter (preferred) to inject system prompt
-    graph = create_react_agent(
-        model=llm,
-        tools=tools,
-        prompt=system_prompt,
-        checkpointer=memory
-    )
-    return graph
 
 # ---------------------------
 # Connection flow: create engine, sql_db, and agent_graph on Connect
@@ -215,57 +145,6 @@ if "db_connected" in st.session_state and st.session_state.db_connected:
         st.sidebar.write(tables)
     except Exception:
         st.sidebar.write("Could not list tables (driver mismatch?)")
-
-# ---------------------------
-# Async stream handler for agent_graph (same pattern as your working code)
-# ---------------------------
-async def stream_graph_events(user_input: str, chat_container):
-    """
-    Async generator that runs the LangGraph agent graph and yields streamed chunks.
-    It visualizes tool start/end events in a status expander.
-    """
-    status = chat_container.status("Thinking & Querying...", expanded=True)
-    full_response = ""
-
-    config = {"configurable": {"thread_id": st.session_state.thread_id}}
-    inputs = {"messages": [HumanMessage(content=user_input)]}
-
-    try:
-        agent_graph = st.session_state.agent_graph
-        async for event in agent_graph.astream_events(inputs, config=config, version="v2"):
-            kind = event.get("event")
-            name = event.get("name")
-
-            if kind == "on_tool_start":
-                tool_name = name
-                tool_inputs = event["data"].get("input")
-                status.write(f"🛠️ **Tool:** `{tool_name}`")
-                if tool_name == "sql_db_query":
-                    if isinstance(tool_inputs, dict):
-                        q = tool_inputs.get("query", str(tool_inputs))
-                    else:
-                        q = str(tool_inputs)
-                    status.code(q, language="sql")
-
-            elif kind == "on_tool_end":
-                output = event["data"].get("output")
-                outstr = str(output)
-                if len(outstr) > 300:
-                    outstr = outstr[:300] + "... (truncated)"
-                status.write(f"✅ **Result:** {outstr}")
-
-            elif kind == "on_chat_model_stream":
-                chunk = event["data"]["chunk"].content
-                if chunk:
-                    full_response += chunk
-                    yield chunk
-
-        status.update(label="Reasoning Complete", state="complete", expanded=False)
-
-    except Exception as e:
-        status.update(label="Execution Error", state="error")
-        st.error(f"Agent execution error: {e}")
-        yield f"\n\nSystem Error: {e}"
 
 # ---------------------------
 # Main chat input area (only if agent is connected)
